@@ -229,8 +229,8 @@ namespace llvm
             Call->eraseFromParent();
         }
 
-        // NF->getBasicBlockList().splice(NF->begin(), F->getBasicBlockList());
-        NF->splice(NF->begin(), F, F->begin(), F->end());
+        NF->splice(NF->begin(), F);
+
         // Loop over the argument list, transferring uses of the old arguments over to
         // the new arguments, also transferring over the names as well.
         Function::arg_iterator I2 = NF->arg_begin();

@@ -47,7 +47,6 @@ bool FlatteningPass::flatten(Function &F) {
     origBB.erase(origBB.begin());
     BasicBlock &entryBB = F.getEntryBlock();
     // 如果第一个基本块的末尾是条件跳转，单独分离
-    bool bEntryBB_isConditional = false;
     if(BranchInst *br = dyn_cast<BranchInst>(entryBB.getTerminator())){
         if(br->isConditional()){
             BasicBlock *newBB = entryBB.splitBasicBlock(br, "newBB");
@@ -62,9 +61,7 @@ bool FlatteningPass::flatten(Function &F) {
     BranchInst::Create(dispatchBB, returnBB);
     entryBB.moveBefore(dispatchBB);
     // 去除第一个基本块末尾的跳转
-    if (bEntryBB_isConditional) {
-        entryBB.getTerminator()->eraseFromParent();
-    }
+    entryBB.getTerminator()->eraseFromParent();
     // 使第一个基本块跳转到dispatchBB
     BranchInst *brDispatchBB = BranchInst::Create(dispatchBB, &entryBB);
 
@@ -94,9 +91,7 @@ bool FlatteningPass::flatten(Function &F) {
         // 非条件跳转
         else if(BB->getTerminator()->getNumSuccessors() == 1){
             BasicBlock *sucBB = BB->getTerminator()->getSuccessor(0);
-            if (bEntryBB_isConditional) {
-                entryBB.getTerminator()->eraseFromParent();
-            }
+            BB->getTerminator()->eraseFromParent();
             ConstantInt *numCase = swInst->findCaseDest(sucBB);
             new StoreInst(numCase, swVarPtr, BB);
             BranchInst::Create(returnBB, BB);

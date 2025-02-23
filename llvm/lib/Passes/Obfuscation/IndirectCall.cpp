@@ -110,11 +110,11 @@ GlobalVariable *IndirectCallPass::getIndirectCallees(Function &F, ConstantInt *E
     // callee's address
     std::vector<Constant *> Elements;
     for (auto Callee : Callees){
-        Constant *CE = ConstantExpr::getBitCast(Callee, PointerType::getUnqual(Type::getInt8Ty(F.getContext())));
+        Constant *CE = ConstantExpr::getBitCast(Callee, llvm::PointerType::get(Type::getInt8Ty(F.getContext()),0));
         CE = ConstantExpr::getGetElementPtr(Type::getInt8Ty(F.getContext()), CE, EncKey);
         Elements.push_back(CE);
     }
-    ArrayType *ATy = ArrayType::get(PointerType::getUnqual(Type::getInt8Ty(F.getContext())), Elements.size());
+    ArrayType *ATy = ArrayType::get(llvm::PointerType::get(Type::getInt8Ty(F.getContext()),0), Elements.size());
     Constant *CA = ConstantArray::get(ATy, ArrayRef<Constant *>(Elements));
     GV = new GlobalVariable(*F.getParent(), ATy, false, GlobalValue::LinkageTypes::PrivateLinkage, CA, GVName);
     appendToCompilerUsed(*F.getParent(), {GV});

@@ -132,14 +132,14 @@ GlobalVariable *IndirectBranchPass::getIndirectTargets(Function &F, ConstantInt 
   std::vector<Constant *> Elements;
   for (const auto BB : BBTargets) {
     Constant *CE = ConstantExpr::getBitCast(BlockAddress::get(BB),
-                                            PointerType::getUnqual(Type::getInt8Ty(F.getContext())));
+                                            llvm::PointerType::get(Type::getInt8Ty(F.getContext()),0));
     CE = ConstantExpr::getGetElementPtr(Type::getInt8Ty(F.getContext()), CE,
                                         EncKey);
     Elements.push_back(CE);
   }
 
   ArrayType *ATy =
-      ArrayType::get(PointerType::getUnqual(Type::getInt8Ty(F.getContext())), Elements.size());
+      ArrayType::get(llvm::PointerType::get(Type::getInt8Ty(F.getContext()),0), Elements.size());
   Constant *CA = ConstantArray::get(ATy, ArrayRef<Constant *>(Elements));
   GV =
       new GlobalVariable(*F.getParent(), ATy, false,

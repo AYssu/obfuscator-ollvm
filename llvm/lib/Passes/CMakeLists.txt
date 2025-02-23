@@ -6,7 +6,6 @@ add_llvm_component_library(LLVMPasses
   PassPlugin.cpp
   StandardInstrumentations.cpp
 
-
   Obfuscation/Utils.cpp
   Obfuscation/CryptoUtils.cpp
   Obfuscation/ObfuscationOptions.cpp
@@ -19,10 +18,12 @@ add_llvm_component_library(LLVMPasses
   Obfuscation/IndirectBranch.cpp
   Obfuscation/IndirectCall.cpp
   Obfuscation/IndirectGlobalVariable.cpp
-  
+
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Passes
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/lib/Passes/Obfuscation
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/lib/Passes/Obfuscation/compat
 
   DEPENDS
   intrinsics_gen

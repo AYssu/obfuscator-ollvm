@@ -164,6 +164,20 @@ bool llvm::toObfuscate(bool flag, Function *f,
   return false;
 }
 
+
+static bool valueEscapes(const Instruction &Inst) {
+  if (!Inst.getType()->isSized())
+    return false;
+
+  const BasicBlock *BB = Inst.getParent();
+  for (const User *U : Inst.users()) {
+    const Instruction *UI = cast<Instruction>(U);
+    if (UI->getParent() != BB || isa<PHINode>(UI))
+      return true;
+  }
+  return false;
+}
+
 /** LLVM\llvm\lib\Transforms\Scalar\Reg2Mem.cpp
  * @brief 修复PHI指令和逃逸变量
  *
@@ -190,13 +204,13 @@ void llvm::fixStack(Function &F) {
   // allocas in entry block.
   std::list<Instruction *> WorkList;
   for (Instruction &I : instructions(F))
-    if (!(isa<AllocaInst>(I) && I.getParent() == BBEntry))
+    if (!(isa<AllocaInst>(I) && I.getParent() == BBEntry) && valueEscapes(I))
       WorkList.push_front(&I);
 
   // Demote escaped instructions
   //NumRegsDemoted += WorkList.size();
   for (Instruction *I : WorkList)
-    DemoteRegToStack(*I, false, AllocaInsertionPoint);
+    DemoteRegToStack(*I, false, AllocaInsertionPoint); //fix for llvm 18
 
   WorkList.clear();
 
@@ -208,7 +222,7 @@ void llvm::fixStack(Function &F) {
   // Demote phi nodes
   //NumPhisDemoted += WorkList.size();
   for (Instruction *I : WorkList)
-    DemotePHIToStack(cast<PHINode>(I), AllocaInsertionPoint);
+    DemotePHIToStack(cast<PHINode>(I), AllocaInsertionPoint); //fix for llvm18
 }
 
 /**
