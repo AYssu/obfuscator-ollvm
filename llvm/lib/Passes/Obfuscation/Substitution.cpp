@@ -502,6 +502,164 @@ void SubstitutionPass::xorSubstitutionRand(BinaryOperator *bo) {
   bo->replaceAllUsesWith(op);
 }
 
+// ==================== MBA 变体实现 ====================
+
+// x + y = (x ^ y) + 2 * (x & y)
+void SubstitutionPass::addMBA1(BinaryOperator *bo) {
+  if (bo->getOpcode() != Instruction::Add) return;
+  
+  BinaryOperator *xorOp = BinaryOperator::Create(
+      Instruction::Xor, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *shl = BinaryOperator::Create(
+      Instruction::Shl, andOp, ConstantInt::get(bo->getType(), 1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Add, xorOp, shl, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x + y = (x | y) + (x & y)
+void SubstitutionPass::addMBA2(BinaryOperator *bo) {
+  if (bo->getOpcode() != Instruction::Add) return;
+  
+  BinaryOperator *orOp = BinaryOperator::Create(
+      Instruction::Or, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Add, orOp, andOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x + y = 2*(x | y) - (x ^ y)
+void SubstitutionPass::addMBA3(BinaryOperator *bo) {
+  if (bo->getOpcode() != Instruction::Add) return;
+  
+  BinaryOperator *orOp = BinaryOperator::Create(
+      Instruction::Or, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *shl = BinaryOperator::Create(
+      Instruction::Shl, orOp, ConstantInt::get(bo->getType(), 1), "", bo);
+  BinaryOperator *xorOp = BinaryOperator::Create(
+      Instruction::Xor, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Sub, shl, xorOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x - y = (x ^ y) - 2 * (~x & y)
+void SubstitutionPass::subMBA1(BinaryOperator *bo) {
+  if (bo->getOpcode() != Instruction::Sub) return;
+  
+  BinaryOperator *xorOp = BinaryOperator::Create(
+      Instruction::Xor, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *notX = BinaryOperator::CreateNot(bo->getOperand(0), "", bo);
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, notX, bo->getOperand(1), "", bo);
+  BinaryOperator *shl = BinaryOperator::Create(
+      Instruction::Shl, andOp, ConstantInt::get(bo->getType(), 1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Sub, xorOp, shl, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x - y = (x & ~y) - (~x & y)
+void SubstitutionPass::subMBA2(BinaryOperator *bo) {
+  if (bo->getOpcode() != Instruction::Sub) return;
+  
+  BinaryOperator *notY = BinaryOperator::CreateNot(bo->getOperand(1), "", bo);
+  BinaryOperator *notX = BinaryOperator::CreateNot(bo->getOperand(0), "", bo);
+  BinaryOperator *and1 = BinaryOperator::Create(
+      Instruction::And, bo->getOperand(0), notY, "", bo);
+  BinaryOperator *and2 = BinaryOperator::Create(
+      Instruction::And, notX, bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Sub, and1, and2, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x - y = 2*(x & ~y) - (x ^ y)
+void SubstitutionPass::subMBA3(BinaryOperator *bo) {
+  if (bo->getOpcode() != Instruction::Sub) return;
+  
+  BinaryOperator *notY = BinaryOperator::CreateNot(bo->getOperand(1), "", bo);
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, bo->getOperand(0), notY, "", bo);
+  BinaryOperator *shl = BinaryOperator::Create(
+      Instruction::Shl, andOp, ConstantInt::get(bo->getType(), 1), "", bo);
+  BinaryOperator *xorOp = BinaryOperator::Create(
+      Instruction::Xor, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Sub, shl, xorOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x & y = (x | y) - (x ^ y)
+void SubstitutionPass::andMBA1(BinaryOperator *bo) {
+  BinaryOperator *orOp = BinaryOperator::Create(
+      Instruction::Or, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *xorOp = BinaryOperator::Create(
+      Instruction::Xor, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Sub, orOp, xorOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x & y = ~(~x | ~y)  (De Morgan)
+void SubstitutionPass::andMBA2(BinaryOperator *bo) {
+  BinaryOperator *notX = BinaryOperator::CreateNot(bo->getOperand(0), "", bo);
+  BinaryOperator *notY = BinaryOperator::CreateNot(bo->getOperand(1), "", bo);
+  BinaryOperator *orOp = BinaryOperator::Create(
+      Instruction::Or, notX, notY, "", bo);
+  BinaryOperator *result = BinaryOperator::CreateNot(orOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x | y = (x & y) + (x ^ y)
+void SubstitutionPass::orMBA1(BinaryOperator *bo) {
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *xorOp = BinaryOperator::Create(
+      Instruction::Xor, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Add, andOp, xorOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x | y = ~(~x & ~y)  (De Morgan)
+void SubstitutionPass::orMBA2(BinaryOperator *bo) {
+  BinaryOperator *notX = BinaryOperator::CreateNot(bo->getOperand(0), "", bo);
+  BinaryOperator *notY = BinaryOperator::CreateNot(bo->getOperand(1), "", bo);
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, notX, notY, "", bo);
+  BinaryOperator *result = BinaryOperator::CreateNot(andOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x ^ y = (x | y) - (x & y)
+void SubstitutionPass::xorMBA1(BinaryOperator *bo) {
+  BinaryOperator *orOp = BinaryOperator::Create(
+      Instruction::Or, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *andOp = BinaryOperator::Create(
+      Instruction::And, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::Sub, orOp, andOp, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
+// x ^ y = (x | y) & (~x | ~y)
+void SubstitutionPass::xorMBA2(BinaryOperator *bo) {
+  BinaryOperator *orOp = BinaryOperator::Create(
+      Instruction::Or, bo->getOperand(0), bo->getOperand(1), "", bo);
+  BinaryOperator *notX = BinaryOperator::CreateNot(bo->getOperand(0), "", bo);
+  BinaryOperator *notY = BinaryOperator::CreateNot(bo->getOperand(1), "", bo);
+  BinaryOperator *orNot = BinaryOperator::Create(
+      Instruction::Or, notX, notY, "", bo);
+  BinaryOperator *result = BinaryOperator::Create(
+      Instruction::And, orOp, orNot, "", bo);
+  bo->replaceAllUsesWith(result);
+}
+
 SubstitutionPass *llvm::createSubstitutionPass(bool flag) {
   return new SubstitutionPass(flag);
 }

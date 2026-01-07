@@ -29,11 +29,11 @@
 // Namespace
 using namespace llvm;
 
-#define NUMBER_ADD_SUBST 4
-#define NUMBER_SUB_SUBST 3
-#define NUMBER_AND_SUBST 2
-#define NUMBER_OR_SUBST 2
-#define NUMBER_XOR_SUBST 2
+#define NUMBER_ADD_SUBST 7
+#define NUMBER_SUB_SUBST 6
+#define NUMBER_AND_SUBST 4
+#define NUMBER_OR_SUBST 4
+#define NUMBER_XOR_SUBST 4
 
 namespace llvm {
     class SubstitutionPass : public PassInfoMixin<SubstitutionPass> {
@@ -51,19 +51,31 @@ namespace llvm {
             funcAdd[1] = &SubstitutionPass::addDoubleNeg;
             funcAdd[2] = &SubstitutionPass::addRand;
             funcAdd[3] = &SubstitutionPass::addRand2;
+            funcAdd[4] = &SubstitutionPass::addMBA1;  // MBA: (x^y) + 2*(x&y)
+            funcAdd[5] = &SubstitutionPass::addMBA2;  // MBA: (x|y) + (x&y)
+            funcAdd[6] = &SubstitutionPass::addMBA3;  // MBA: 2*(x|y) - (x^y)
 
             funcSub[0] = &SubstitutionPass::subNeg;
             funcSub[1] = &SubstitutionPass::subRand;
             funcSub[2] = &SubstitutionPass::subRand2;
+            funcSub[3] = &SubstitutionPass::subMBA1;  // MBA: (x^y) - 2*(~x&y)
+            funcSub[4] = &SubstitutionPass::subMBA2;  // MBA: (x&~y) - (~x&y)
+            funcSub[5] = &SubstitutionPass::subMBA3;  // MBA: 2*(x&~y) - (x^y)
 
             funcAnd[0] = &SubstitutionPass::andSubstitution;
             funcAnd[1] = &SubstitutionPass::andSubstitutionRand;
+            funcAnd[2] = &SubstitutionPass::andMBA1;  // MBA: (x|y) - (x^y)
+            funcAnd[3] = &SubstitutionPass::andMBA2;  // MBA: ~(~x|~y)
 
             funcOr[0] = &SubstitutionPass::orSubstitution;
             funcOr[1] = &SubstitutionPass::orSubstitutionRand;
+            funcOr[2] = &SubstitutionPass::orMBA1;    // MBA: (x&y) + (x^y)
+            funcOr[3] = &SubstitutionPass::orMBA2;    // MBA: ~(~x&~y)
 
             funcXor[0] = &SubstitutionPass::xorSubstitution;
             funcXor[1] = &SubstitutionPass::xorSubstitutionRand;
+            funcXor[2] = &SubstitutionPass::xorMBA1;  // MBA: (x|y) - (x&y)
+            funcXor[3] = &SubstitutionPass::xorMBA2;  // MBA: (x|y) & (~x|~y)
           }
 
           PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
@@ -87,9 +99,23 @@ namespace llvm {
           void xorSubstitution(BinaryOperator *bo);
           void xorSubstitutionRand(BinaryOperator *bo);
 
-          static bool isRequired() { return true; } // ÷±Ω”∑µªÿtrueº¥ø…
+          // MBA Âèò‰Ωì
+          void addMBA1(BinaryOperator *bo);  // (x^y) + 2*(x&y)
+          void addMBA2(BinaryOperator *bo);  // (x|y) + (x&y)
+          void addMBA3(BinaryOperator *bo);  // 2*(x|y) - (x^y)
+          void subMBA1(BinaryOperator *bo);  // (x^y) - 2*(~x&y)
+          void subMBA2(BinaryOperator *bo);  // (x&~y) - (~x&y)
+          void subMBA3(BinaryOperator *bo);  // 2*(x&~y) - (x^y)
+          void andMBA1(BinaryOperator *bo);  // (x|y) - (x^y)
+          void andMBA2(BinaryOperator *bo);  // ~(~x|~y)
+          void orMBA1(BinaryOperator *bo);   // (x&y) + (x^y)
+          void orMBA2(BinaryOperator *bo);   // ~(~x&~y)
+          void xorMBA1(BinaryOperator *bo);  // (x|y) - (x&y)
+          void xorMBA2(BinaryOperator *bo);  // (x|y) & (~x|~y)
+
+          static bool isRequired() { return true; } // ÷±ÔøΩ”∑ÔøΩÔøΩÔøΩtrueÔøΩÔøΩÔøΩÔøΩ
     };
-    SubstitutionPass *createSubstitutionPass(bool flag); // ¥¥Ω®ª˘±æøÈ∑÷∏Ó
+    SubstitutionPass *createSubstitutionPass(bool flag); // ÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩÔøΩ÷∏ÔøΩ
 } // namespace llvm
 
 #endif
