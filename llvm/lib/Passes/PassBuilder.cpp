@@ -441,8 +441,8 @@ PassBuilder::PassBuilder(TargetMachine *TM, PipelineTuningOptions PTO,
         MPM.addPass(StringEncryptionPass(s_obf_sobf)); // 先进行字符串加密 出现字符串加密基本块以后再进行基本块分割和其他混淆 加大解密难度
         llvm::FunctionPassManager FPM;
         FPM.addPass(IndirectCallPass(s_obf_icall)); // 间接调用
-        FPM.addPass(SplitBasicBlockPass(s_obf_split)); // 优先进行基本块分割
-        FPM.addPass(FlatteningPass(s_obf_fla)); // 对于控制流平坦化
+        FPM.addPass(FlatteningPass(s_obf_fla)); // 控制流平坦化 (必须在 Split 之前)
+        FPM.addPass(SplitBasicBlockPass(s_obf_split)); // 基本块分割
         FPM.addPass(SubstitutionPass(s_obf_sub)); // 指令替换
         FPM.addPass(BogusControlFlowPass(s_obf_bcf)); // 虚假控制流
         MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));

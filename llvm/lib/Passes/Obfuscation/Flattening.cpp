@@ -2,121 +2,181 @@
 #include "CryptoUtils.h"
 #include "Flattening.h"
 #include "SplitBasicBlock.h"
-//#include "llvm/Transforms/Utils/LowerSwitch.h"
-// namespace
+#include <random>
+#include <algorithm>
+
 using namespace llvm;
 using std::vector;
 
-#define DEBUG_TYPE "flattening" // 调试标识
-// Stats
+#define DEBUG_TYPE "flattening"
 STATISTIC(Flattened, "Functions flattened");
 
 PreservedAnalyses FlatteningPass::run(Function& F, FunctionAnalysisManager& AM) {
-    Function *tmp = &F; // 传入的Function
-    // 判断是否需要开启控制流平坦化
+    Function *tmp = &F;
     if (toObfuscate(flag, tmp, "fla")) {
-      INIT_CONTEXT(F);
-      // outs()<<"[Soule] debug. "<< F.getName()<<" \n";
-      if (flatten(*tmp)) {
-        ++Flattened;
-      }
-      return PreservedAnalyses::none();
+        INIT_CONTEXT(F);
+        if (flatten(*tmp)) {
+            ++Flattened;
+        }
+        return PreservedAnalyses::none();
     }
     return PreservedAnalyses::all();
 }
 
-
 bool FlatteningPass::flatten(Function &F) {
-    // 基本块数量不超过1则无需平坦化
-    if(F.size() <= 1){
-        //outs() << "\033[0;33mFunction size is lower then one\033[0m\n"; // warning
+    if (F.size() <= 1) {
         return false;
     }
-    // emmmm.......
+
     if (F.getName().str().find("$basic_ostream") != std::string::npos) {
-      outs() << "[obf] force_nofla: " << F.getName().str().c_str() << "\n";
-      return false;
+        return false;
     }
-    // 将除入口块（第一个基本块）以外的基本块保存到一个 vector 容器中，便于后续处理
-    // 首先保存所有基本块
+
     vector<BasicBlock*> origBB;
-    for(BasicBlock &BB: F){
+
+    for (BasicBlock &BB : F) {
+        if (isa<InvokeInst>(BB.getTerminator()) || BB.isEHPad()) {
+            return false;
+        }
         origBB.push_back(&BB);
     }
-    // 从vector中去除第一个基本块
+
+    // 从 vector 中去除第一个基本块（入口块）
     origBB.erase(origBB.begin());
     BasicBlock &entryBB = F.getEntryBlock();
+
     // 如果第一个基本块的末尾是条件跳转，单独分离
-    if(BranchInst *br = dyn_cast<BranchInst>(entryBB.getTerminator())){
-        if(br->isConditional()){
+    if (BranchInst *br = dyn_cast<BranchInst>(entryBB.getTerminator())) {
+        if (br->isConditional()) {
             BasicBlock *newBB = entryBB.splitBasicBlock(br, "newBB");
             origBB.insert(origBB.begin(), newBB);
-            bEntryBB_isConditional = true;
         }
     }
+
+    if (origBB.empty()) {
+        return false;
+    }
+
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::shuffle(origBB.begin(), origBB.end(), rng);
 
     // 创建分发块和返回块
     BasicBlock *dispatchBB = BasicBlock::Create(*CONTEXT, "dispatchBB", &F, &entryBB);
     BasicBlock *returnBB = BasicBlock::Create(*CONTEXT, "returnBB", &F, &entryBB);
     BranchInst::Create(dispatchBB, returnBB);
     entryBB.moveBefore(dispatchBB);
-    // 去除第一个基本块末尾的跳转
+
     entryBB.getTerminator()->eraseFromParent();
-    // 使第一个基本块跳转到dispatchBB
     BranchInst *brDispatchBB = BranchInst::Create(dispatchBB, &entryBB);
 
-    // 在入口块插入alloca和store指令创建并初始化switch变量，初始值为随机值
-    int randNumCase = rand();
+    // 创建 switch 变量和 XOR key 变量
     AllocaInst *swVarPtr = new AllocaInst(TYPE_I32, 0, "swVar.ptr", brDispatchBB);
-    new StoreInst(CONST_I32(randNumCase), swVarPtr, brDispatchBB);
-    // 在分发块插入load指令读取switch变量
-    LoadInst *swVar = new LoadInst(TYPE_I32, swVarPtr, "swVar", false, dispatchBB);
-    // 在分发块插入switch指令实现基本块的调度
-    BasicBlock *swDefault = BasicBlock::Create(*CONTEXT, "swDefault", &F, returnBB);
-    BranchInst::Create(returnBB, swDefault);
-    SwitchInst *swInst = SwitchInst::Create(swVar, swDefault, 0, dispatchBB);
-    // 将原基本块插入到返回块之前，并分配case值
-    for(BasicBlock *BB : origBB){
-        BB->moveBefore(returnBB);
-        swInst->addCase(CONST_I32(randNumCase), BB);
-        randNumCase = rand();
+    AllocaInst *swXorPtr = new AllocaInst(TYPE_I32, 0, "swXor.ptr", brDispatchBB);
+
+    // 为每个基本块分配 case 值，建立双向映射
+    std::map<BasicBlock*, uint32_t> bbCaseMap;
+    for (BasicBlock *BB : origBB) {
+        bbCaseMap[BB] = cryptoutils->get_uint32_t();
     }
 
-    // 在每个基本块最后添加修改switch变量的指令和跳转到返回块的指令
-    for(BasicBlock *BB : origBB){
-        // retn BB
-        if(BB->getTerminator()->getNumSuccessors() == 0){
+    // 初始化入口的 switch 变量（加密后的值）和 XOR key
+    uint32_t firstCase = bbCaseMap[origBB[0]];
+    uint32_t entryXorKey = cryptoutils->get_uint32_t();
+    uint32_t entryEncVal = firstCase ^ entryXorKey;
+
+    new StoreInst(CONST_I32(entryEncVal), swVarPtr, brDispatchBB);
+    new StoreInst(CONST_I32(entryXorKey), swXorPtr, brDispatchBB);
+
+    // 在分发块：load 两个变量，XOR 解密得到真正的 case 值
+    LoadInst *swVar = new LoadInst(TYPE_I32, swVarPtr, "swVar", false, dispatchBB);
+    LoadInst *swXor = new LoadInst(TYPE_I32, swXorPtr, "swXor", false, dispatchBB);
+    BinaryOperator *swDecrypted = BinaryOperator::Create(
+        Instruction::Xor, swVar, swXor, "swDecrypted", dispatchBB);
+
+    // 创建 switch
+    BasicBlock *swDefault = BasicBlock::Create(*CONTEXT, "swDefault", &F, returnBB);
+    BranchInst::Create(returnBB, swDefault);
+    SwitchInst *swInst = SwitchInst::Create(swDecrypted, swDefault, origBB.size(), dispatchBB);
+
+    // 添加 case
+    for (BasicBlock *BB : origBB) {
+        BB->moveBefore(returnBB);
+        swInst->addCase(CONST_I32(bbCaseMap[BB]), BB);
+    }
+
+    // 处理每个基本块的跳转
+    for (BasicBlock *BB : origBB) {
+        // 返回块，无后继
+        if (BB->getTerminator()->getNumSuccessors() == 0) {
             continue;
         }
         // 非条件跳转
-        else if(BB->getTerminator()->getNumSuccessors() == 1){
+        else if (BB->getTerminator()->getNumSuccessors() == 1) {
             BasicBlock *sucBB = BB->getTerminator()->getSuccessor(0);
             BB->getTerminator()->eraseFromParent();
-            ConstantInt *numCase = swInst->findCaseDest(sucBB);
-            new StoreInst(numCase, swVarPtr, BB);
+
+            // 查找后继块的 case 值
+            uint32_t sucCaseVal;
+            auto it = bbCaseMap.find(sucBB);
+            if (it != bbCaseMap.end()) {
+                sucCaseVal = it->second;
+            } else {
+                // 后继不在 origBB 中，说明是跳到入口块或其他特殊情况
+                // 这种情况不应该发生在正常的平坦化流程中
+                // 但为了安全，我们跳过这个块的处理
+                BranchInst::Create(sucBB, BB);
+                continue;
+            }
+
+            // 生成新的 XOR key，加密 case 值
+            uint32_t xorKey = cryptoutils->get_uint32_t();
+            uint32_t encVal = sucCaseVal ^ xorKey;
+
+            new StoreInst(CONST_I32(encVal), swVarPtr, BB);
+            new StoreInst(CONST_I32(xorKey), swXorPtr, BB);
             BranchInst::Create(returnBB, BB);
         }
         // 条件跳转
-        else if(BB->getTerminator()->getNumSuccessors() == 2){
-            // BranchInst *br = cast<BranchInst>(BB->getTerminator());
+        else if (BB->getTerminator()->getNumSuccessors() == 2) {
             BranchInst *br = dyn_cast<BranchInst>(BB->getTerminator());
-            if (!br) {
-              //outs() << "[FAILED] dyn_cast<BranchInst>(BB->getTerminator()); " << BB->getName() << "\n";
-              continue;
+            if (!br || !br->isConditional()) {
+                continue;
             }
-            if (!br->isConditional()) {
-              //outs() << "[FAILED] br->isConditional(); " << BB->getName() << "\n";
-              continue;
+
+            BasicBlock *sucTrue = br->getSuccessor(0);
+            BasicBlock *sucFalse = br->getSuccessor(1);
+
+            // 查找两个后继块的 case 值
+            auto itTrue = bbCaseMap.find(sucTrue);
+            auto itFalse = bbCaseMap.find(sucFalse);
+
+            // 如果任一后继不在 map 中，保持原跳转
+            if (itTrue == bbCaseMap.end() || itFalse == bbCaseMap.end()) {
+                continue;
             }
-            ConstantInt *numCaseTrue = swInst->findCaseDest(BB->getTerminator()->getSuccessor(0));
-            ConstantInt *numCaseFalse = swInst->findCaseDest(BB->getTerminator()->getSuccessor(1));
-            SelectInst *sel = SelectInst::Create(br->getCondition(), numCaseTrue, numCaseFalse, "", BB->getTerminator());
+
+            uint32_t caseTrue = itTrue->second;
+            uint32_t caseFalse = itFalse->second;
+
+            // 条件跳转：两个分支用同一个 XOR key
+            uint32_t xorKey = cryptoutils->get_uint32_t();
+            uint32_t encTrue = caseTrue ^ xorKey;
+            uint32_t encFalse = caseFalse ^ xorKey;
+
+            Value *cond = br->getCondition();
             BB->getTerminator()->eraseFromParent();
+
+            SelectInst *sel = SelectInst::Create(
+                cond, CONST_I32(encTrue), CONST_I32(encFalse), "selEnc", BB);
+
             new StoreInst(sel, swVarPtr, BB);
+            new StoreInst(CONST_I32(xorKey), swXorPtr, BB);
             BranchInst::Create(returnBB, BB);
         }
     }
-    fixStack(F); // 修复逃逸变量和PHI指令
+
+    fixStack(F);
     return true;
 }
 
