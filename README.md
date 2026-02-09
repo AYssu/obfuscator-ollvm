@@ -42,3 +42,6 @@ chat](https://discord.gg/xS7Z362),
 
 The LLVM project has adopted a [code of conduct](https://llvm.org/docs/CodeOfConduct.html) for
 participants to all modes of communication within the project.
+
+
+base ollvm https://github.com/AYssu/Arkari 仅移植
